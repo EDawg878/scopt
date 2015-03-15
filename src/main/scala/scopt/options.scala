@@ -1,7 +1,5 @@
 package scopt
 
-import scopt.ConsoleHandler.{DefaultConsole, ConsoleHandler}
-
 import scala.collection.mutable.{ListBuffer, ListMap}
 
 trait Read[A] { self =>
@@ -131,23 +129,23 @@ object ConsoleHandler {
 
   }
 
-  class DefaultConsole extends ConsoleHandler[Unit] {
+  class DefaultConsole extends ConsoleHandler[ScalaConsole] {
 
-    override def print(console: Unit, msg: String): Unit = Console.out.println(msg)
-
-    override def printError(console: Unit, msg: String): Unit = Console.err.println(msg)
+    override def print(console: ScalaConsole, msg: String): Unit = Console.out.println(msg)
 
     override def exit(): Unit = sys.exit()
 
+    override def printError(console: ScalaConsole, msg: String): Unit = Console.err.println(msg)
   }
+
+  class ScalaConsole
 
 }
 
 import scopt.OptionDef.handler
+import scopt.ConsoleHandler.{ScalaConsole, ConsoleHandler, DefaultConsole}
 
-abstract class OptionParser[C](name : String) extends CustomOptionParser[C, Unit](name)(handler) {
-  implicit val console: Unit = Unit
-}
+abstract class OptionParser[C](name : String) extends CustomOptionParser[C, ScalaConsole](name)(handler)
 
 /** <code>scopt.immutable.OptionParser</code> is instantiated within your object,
   * set up by an (ordered) sequence of invocations of
@@ -203,12 +201,12 @@ abstract case class CustomOptionParser[C, S](programName: String)(implicit handl
     handler.printError(console, "Warning: " + msg)
   }
 
-  def showTryHelp(): Unit = {
+  def showTryHelp(implicit console: S): Unit = {
     def oxford(xs: List[String]): String = xs match {
       case a :: b :: Nil => a + " or " + b
       case _             => (xs.dropRight(2) :+ xs.takeRight(2).mkString(", or ")).mkString(", ")
     }
-    Console.err.println("Try " + oxford(helpOptions.toList map {_.fullName}) + " for more information.")
+    handler.printError(console, "Try " + oxford(helpOptions.toList map {_.fullName}) + " for more information.")
   }
 
   /** adds usage text. */
@@ -242,10 +240,10 @@ abstract case class CustomOptionParser[C, S](programName: String)(implicit handl
   /** adds an option invoked by `--name` that displays usage text and exits.
     * @param name name of the option
     */
-  def help(name: String): OptionDef[Unit, C, S] = {
+  def help(name: String)(implicit console: S): OptionDef[Unit, C, S] = {
     val o = opt[Unit](name) action { (x, c) =>
-      showUsage()
-      sys.exit()
+      showUsage(console)
+      handler.exit()
       c
     }
     helpOptions += o
@@ -256,10 +254,10 @@ abstract case class CustomOptionParser[C, S](programName: String)(implicit handl
   /** adds an option invoked by `--name` that displays header text and exits.
     * @param name name of the option
     */
-  def version(name: String): OptionDef[Unit, C, S] =
+  def version(name: String)(implicit console: S): OptionDef[Unit, C, S] =
     opt[Unit](name) action { (x, c) =>
-      showHeader()
-      sys.exit()
+      showHeader(console)
+      handler.exit()
       c
     }
 
@@ -267,19 +265,19 @@ abstract case class CustomOptionParser[C, S](programName: String)(implicit handl
   def checkConfig(f: C => Either[String, Unit]): OptionDef[Unit, C, S] =
     makeDef[Unit](Check, "") validateConfig(f)
 
-  def showHeader() {
-    Console.out.println(header)
+  def showHeader(console: S) {
+    handler.print(console, header)
   }
   def header: String = {
     import scopt.OptionDef._
     (heads map {_.usage}).mkString(NL)
   }
 
-  def showUsage(): Unit = {
-    Console.out.println(usage)
+  def showUsage(console: S): Unit = {
+    handler.print(console, usage)
   }
-  def showUsageAsError(): Unit = {
-    Console.err.println(usage)
+  def showUsageAsError(console: S): Unit = {
+    handler.printError(console, usage)
   }
   def usage: String = {
     import scopt.OptionDef._
@@ -434,8 +432,11 @@ abstract case class CustomOptionParser[C, S](programName: String)(implicit handl
           args(i) match {
             case arg if arg startsWith "--" => handleError("Unknown option " + arg)
             case arg if arg startsWith "-"  =>
-              if (arg == "-") handleError("Unknown option " + arg)
-              else handleShortOptions(arg drop 1)
+              if (arg == "-") {
+                val first = pendingArgs.head
+                handleOccurrence(first, pendingArgs)
+                handleArgument(first, arg)
+              } else handleShortOptions(arg drop 1)
             case arg if findCommand(arg).isDefined =>
               val cmd = findCommand(arg).get
               handleOccurrence(cmd, pendingCommands)
@@ -461,8 +462,8 @@ abstract case class CustomOptionParser[C, S](programName: String)(implicit handl
     }
     handleChecks(_config)
     if (_error) {
-      if (showUsageOnError) showUsageAsError()
-      else showTryHelp()
+      if (showUsageOnError) showUsageAsError(console)
+      else showTryHelp(console)
       None
     }
     else Some(_config)
