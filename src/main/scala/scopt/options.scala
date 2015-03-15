@@ -190,6 +190,7 @@ abstract case class CustomOptionParser[C, S](programName: String)(implicit handl
   protected val options = new ListBuffer[OptionDef[_, C, S]]
   protected val helpOptions = new ListBuffer[OptionDef[_, C, S]]
 
+  def allowMinusArgument: Boolean = true
   def errorOnUnknownArgument: Boolean = true
   def showUsageOnError: Boolean = helpOptions.isEmpty
 
@@ -431,12 +432,9 @@ abstract case class CustomOptionParser[C, S](programName: String)(implicit handl
         case None =>
           args(i) match {
             case arg if arg startsWith "--" => handleError("Unknown option " + arg)
-            case arg if arg startsWith "-"  =>
-              if (arg == "-") {
-                val first = pendingArgs.head
-                handleOccurrence(first, pendingArgs)
-                handleArgument(first, arg)
-              } else handleShortOptions(arg drop 1)
+            case arg if args.startsWith("-") && !(allowMinusArgument && arg == "-") =>
+              if (arg == "-") handleError("Unknown option " + arg)
+              else handleShortOptions(arg drop 1)
             case arg if findCommand(arg).isDefined =>
               val cmd = findCommand(arg).get
               handleOccurrence(cmd, pendingCommands)
